@@ -54,8 +54,14 @@ python main.py status           # 验证 cookie 登录态
 python main.py agi --dry-run    # AGI 日报干跑(只构造不发布)
 python main.py ai  --dry-run    # AI 情报站干跑
 python main.py agi              # 立即发布一次 AGI 日报
-nohup python main.py scheduler >/dev/null 2>&1 &   # 常驻调度
+
+# 常驻调度(两种方式)
+python run_daemon.py            # ❶ 推荐: 双 fork 守护进程(沙箱环境实测可存活)
+nohup python main.py scheduler >/dev/null 2>&1 &   # ❷ 常规 nohup(自有服务器)
 ```
+
+> 沙箱/容器环境会回收 nohup/setsid 后台进程时，用 `run_daemon.py`：
+> 双 fork + setsid 完全脱离会话，watchdog 拉起 scheduler，意外退出 10 秒自愈。
 
 ## 调度器
 
@@ -94,6 +100,8 @@ TOP1-3 焦点卡渐变描边，每条新闻带分类 chip + 标语 + 两条要�
 ├── copywriter.py      # LLM 层(z-ai CLI + JSON截断修复 + 微博风格红线)
 ├── image_maker.py     # 长图渲染(HTML + Playwright, 4主题)
 ├── scheduler.py       # 常驻调度器(失败重试/防重/日志轮转)
+├── run_daemon.py      # 双 fork 守护进程启动器(沙箱环境可存活)
+├── test_scheduler.py  # 调度逻辑单测
 ├── main.py            # CLI 入口(status/agi/ai/scheduler)
 ├── config.example.json
 └── state.json         # 防重状态(gitignore)
