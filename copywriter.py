@@ -59,6 +59,10 @@ def _extract_json(text: str) -> Optional[dict]:
 def _repair_truncated_json(text: str) -> Optional[dict]:
     """修复被截断的 JSON: 迭代回退到干净的语法边界, 补齐闭合括号后尝试解析"""
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", (text or "").strip())
+    # 与 _extract_json 对齐: 容忍 JSON 前的前导文字/残缺围栏
+    brace = text.find("{")
+    if brace > 0:
+        text = text[brace:]
     if not text.startswith("{"):
         return None
     try:
