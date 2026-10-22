@@ -1,17 +1,19 @@
 # -*- coding: utf-8 -*-
-"""微博 AI 资讯自动运营 · 统一入口
+"""微博内容矩阵 · 统一入口(2026-10-22 转型版)
 
-两个系列(均为每日更新):
-  agi  AGI 日报     腾讯研究院 AI 速递(微信合集页实时源)  08:30 北京时间
-  ai   AI 情报站    aihot.news 24h 精选资讯                12:00 北京时间
+五个日更栏目(替代原科技日报方向):
+  morning  早安 · AI壁纸     07:30   z-ai 生成壁纸 + 早安文案
+  yiyan    一言 · 午间签     12:00   本地语料 + 文字卡片
+  pet      萌宠 · 午后图签   15:00   图片搜索真实萌宠照
+  history  历史 · 上的今天   18:30   百科CMS + LLM 通俗讲解
+  hot      热榜 · 晚间聚合   21:30   四平台热榜 + LLM 速览
 
 用法:
-  python main.py status              # 查看 cookie 登录态 + 防重状态
-  python main.py agi  --dry-run      # AGI 日报干跑(只构造不发布)
-  python main.py agi                 # AGI 日报正式发布
-  python main.py ai   --dry-run      # AI 情报站干跑
-  python main.py ai                  # AI 情报站正式发布
-  python main.py scheduler           # 启动常驻调度器
+  python main.py status                 # 登录态 + 各栏目防重状态
+  python main.py post morning --dry-run # 单栏目干跑
+  python main.py post morning           # 单栏目正式发布
+  python main.py post all --dry-run     # 五栏目顺序干跑
+  python main.py scheduler              # 启动常驻调度器
 """
 import argparse
 import json
@@ -24,6 +26,13 @@ sys.path.insert(0, BASE_DIR)
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
 
+COLUMNS = ["morning", "yiyan", "pet", "history", "hot"]
+COLUMN_NAMES = {"morning": "早安·AI壁纸", "yiyan": "一言·午间签",
+                "pet": "萌宠·午后图签", "history": "历史·上的今天",
+                "hot": "热榜·晚间聚合"}
+SLOTS = {"morning": "07:30", "yiyan": "12:00", "pet": "15:00",
+         "history": "18:30", "hot": "21:30"}
+
 
 def read_json(path):
     if os.path.exists(path):
@@ -34,11 +43,12 @@ def read_json(path):
 
 def cmd_status():
     from weibo_client import WeiboClient
-    cfg = read_json(CONFIG_PATH)
+    from matrix_common import load_config
+    cfg = load_config()
     state = read_json(STATE_PATH)
-    print("=" * 50)
-    print("微博 AI 资讯运营 · 状态")
-    print("=" * 50)
+    print("=" * 52)
+    print("微博内容矩阵 · 状态")
+    print("=" * 52)
     if not cfg.get("weibo_cookie"):
         print("❌ config.json 缺 weibo_cookie")
         return 1
@@ -49,40 +59,45 @@ def cmd_status():
     except Exception as e:
         print(f"❌ 登录异常: {e}")
         return 1
-    print(f"AGI 日报: 上期已发 {state.get('weibo_agi_last_issue', '无')}"
-          f" | 今日运行: {state.get('weibo_agi_run_date', '无')}")
-    print(f"AI 情报站: 上次已发 {state.get('weibo_ai_last_date', '无')}")
-    wp = cfg.get("weibo_post", {})
-    print(f"调度档期: agi={'on' if wp.get('agi_enabled', True) else 'off'} "
-          f"ai={'on' if wp.get('ai_enabled', True) else 'off'}")
+    mx = cfg.get("matrix", {})
+    for c in COLUMNS:
+        sent = state.get(f"matrix_{c}_last_date", "无")
+        on = "on" if mx.get(f"{c}_enabled", True) else "off"
+        print(f"  {COLUMN_NAMES[c]:<10} {SLOTS[c]}  [{on}]  今日已发: {sent}")
+    return 0
+
+
+def cmd_post(column: str, dry_run: bool):
+    import importlib
+    cols = COLUMNS if column == "all" else [column]
+    for c in cols:
+        if c not in COLUMNS:
+            print(f"未知栏目: {c}")
+            return 1
+        print(f"\n===== {COLUMN_NAMES[c]} =====")
+        mod = importlib.import_module(f"col_{c}")
+        mod.run(dry_run=dry_run)
     return 0
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd")
 
-    sub.add_parser("status", help="登录态与防重状态")
-    p_agi = sub.add_parser("agi", help="AGI 日报(立即执行一次)")
-    p_ai = sub.add_parser("ai", help="AI 情报站(立即执行一次)")
-    for p in (p_agi, p_ai):
-        p.add_argument("--dry-run", action="store_true")
-        p.add_argument("--force", action="store_true")
-        p.add_argument("--no-image", action="store_true")
+    sub.add_parser("status", help="登录态与各栏目防重状态")
+    p_post = sub.add_parser("post", help="立即执行某栏目")
+    p_post.add_argument("column",
+                        choices=COLUMNS + ["all"],
+                        help="栏目名或 all")
+    p_post.add_argument("--dry-run", action="store_true")
     sub.add_parser("scheduler", help="启动常驻调度器")
 
     args = ap.parse_args()
     if args.cmd == "status":
         sys.exit(cmd_status())
-    elif args.cmd == "agi":
-        import agi_daily
-        sys.exit(0 if agi_daily.run(args.dry_run, args.force,
-                                    args.no_image) or True else 1)
-    elif args.cmd == "ai":
-        import ai_news
-        sys.exit(0 if ai_news.run(args.dry_run, args.force,
-                                  args.no_image) or True else 1)
+    elif args.cmd == "post":
+        sys.exit(cmd_post(args.column, args.dry_run))
     elif args.cmd == "scheduler":
         import scheduler
         scheduler.main()
