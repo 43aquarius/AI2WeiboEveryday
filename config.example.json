@@ -1,7 +1,10 @@
 {
   "weibo_cookie": "PC_TOKEN=...; XSRF-TOKEN=...; SCF=...; SUB=...; SUBP=...; ALF=...; WBPSESS=...",
-  "weibo_post": {
-    "agi_enabled": true,
-    "ai_enabled": true
+  "matrix": {
+    "morning_enabled": true,
+    "yiyan_enabled": true,
+    "pet_enabled": true,
+    "history_enabled": true,
+    "hot_enabled": true
   }
 }
