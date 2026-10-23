@@ -5,6 +5,7 @@
 最有讨论度的写晚间速览(每条 25~60 字点评), 纯文字帖 → #今日热榜#
 单源失败自动降级(至少两源可用才发)。
 """
+import datetime
 import random
 
 from copywriter import _STYLE_RULES
@@ -12,10 +13,16 @@ from matrix_common import (call_llm, column_done, extract_json, load_config,
                            mark_column_done, publish)
 from sources import douyin_hot, toutiao_hot, weibo_hot, zhihu_hot
 
+# 时段自适应措辞(白天补发不说"晚间", 21:30 正常档期仍是晚间框架)
+_H = datetime.datetime.now(
+    datetime.timezone(datetime.timedelta(hours=8))).hour
+_FRAME = "晚间" if _H >= 17 else ("午间" if 11 <= _H < 15 else "日间")
+_TONIGHT = "今晚" if _H >= 17 else "今天"
+
 SYSTEM = (
-    "你在微博运营一个'晚间热榜速览'栏目。给你四个平台的热榜条目, "
-    "请挑出6~8条全网络最有讨论度的(跨平台重复出现的话题优先), "
-    "每条写25~60字的点评: 交代这事为什么值得知道, 语气像刷了一晚上"
+    f"你在微博运营一个'{_FRAME}热榜速览'栏目。给你四个平台的热榜条目, "
+    "请挑选6~8条全网络最有讨论度的(跨平台重复出现的话题优先), "
+    f"每条写25~60字的点评: 交代这事为什么值得知道, 语气像刷了{_TONIGHT}"
     "手机的朋友给你划重点, 平实带点态度, 不吃瓜式狂欢。"
     "输出纯 JSON, 不要任何多余文字。" + _STYLE_RULES
 )
@@ -56,7 +63,7 @@ def run(dry_run: bool = False) -> dict:
     lines = "\n".join(f"- 【{plat}】{label}" for plat, label in entries)
 
     raw = call_llm(
-        f"今晚的热榜素材(平台+条目):\n{lines}\n\n"
+        f"{_TONIGHT}的热榜素材(平台+条目):\n{lines}\n\n"
         f"输出JSON: {{\"intro\": \"开头一句,20~40字,今天整体的浏览印象\", "
         f"\"items\": [{{\"plat\": \"平台名\", \"topic\": \"话题\", "
         f"\"text\": \"25~60字点评\"}}]}}", SYSTEM)
