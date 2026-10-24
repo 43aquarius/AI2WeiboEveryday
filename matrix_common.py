@@ -110,14 +110,53 @@ def publish(content: str, image_paths=None, dry_run=False) -> dict:
 
 def gen_image(prompt: str, out_path: str, size: str = "1344x768",
               timeout: int = 300) -> str:
-    """z-ai 图片生成"""
+    """z-ai 图片生成; 生成服务故障时降级为图片搜索+下载(2026-10-24 405事件)"""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    subprocess.run(["z-ai", "image", "-p", prompt, "-o", out_path, "-s", size],
-                   capture_output=True, timeout=timeout, check=True)
-    if not os.path.exists(out_path) or os.path.getsize(out_path) < 10_000:
-        raise RuntimeError(f"图片生成失败: {out_path}")
-    print(f"[img] 已生成 → {os.path.basename(out_path)}")
-    return out_path
+    try:
+        subprocess.run(["z-ai", "image", "-p", prompt, "-o", out_path,
+                        "-s", size],
+                       capture_output=True, timeout=timeout, check=True)
+        if os.path.exists(out_path) and os.path.getsize(out_path) >= 10_000:
+            print(f"[img] 已生成 → {os.path.basename(out_path)}")
+            return out_path
+    except Exception as e:
+        print(f"[img] 生成失败({str(e)[:80]}), 降级图片搜索")
+    # ---- 降级: 用提示词前段搜真实图片, 多候选中优先横版 ----
+    q = prompt.split(",")[0].strip()[:60]
+    want_wide = size and "x" in str(size) and \
+        int(str(size).split("x")[0]) >= int(str(size).split("x")[1])
+    try:
+        cands = search_images(q, count=6) or []
+    except Exception as e:
+        print(f"[img] 搜索降级也失败: {str(e)[:80]}")
+        cands = []
+    best = None
+    for url in cands:
+        try:
+            download_image(url, out_path, min_bytes=10_000)
+            if not want_wide:
+                print(f"[img] 搜索降级图 → {os.path.basename(out_path)}")
+                return out_path
+            from PIL import Image
+            with Image.open(out_path) as im:
+                if im.size[0] >= im.size[1]:      # 横版 ✓
+                    print(f"[img] 搜索降级图(横版{im.size[0]}x{im.size[1]})"
+                          f" → {os.path.basename(out_path)}")
+                    return out_path
+            if best is None:
+                best = url                        # 先留一张竖版兜底
+        except Exception:
+            continue
+    if best:
+        try:
+            download_image(best, out_path, min_bytes=10_000)
+            print(f"[img] 搜索降级图(竖版兜底) → {os.path.basename(out_path)}")
+            return out_path
+        except Exception:
+            pass
+    if cands:
+        raise RuntimeError(f"搜索降级候选全部下载失败: {out_path}")
+    raise RuntimeError(f"图片生成与搜索降级均失败: {out_path}")
 
 
 def search_images(query: str, count: int = 6, timeout: int = 120) -> list:
@@ -136,7 +175,7 @@ def search_images(query: str, count: int = 6, timeout: int = 120) -> list:
         try:
             r = subprocess.run(
                 ["z-ai", "image-search", "-q", q, "-c", str(count)],
-                capture_output=True, timeout=timeout, check=True)
+                capture_output=True, timeout=timeout, check=False)
             out = r.stdout.decode("utf-8", "ignore")
             urls = []
             for m in re.finditer(r'https?://[^\s"\']+?\.(?:jpg|jpeg|png|webp)',
@@ -147,9 +186,12 @@ def search_images(query: str, count: int = 6, timeout: int = 120) -> list:
             if urls:
                 if q != query:
                     print(f"[search] 完整查询失败, 降级 '{q}' 命中")
-                print(f"[search] '{q}' → {len(urls)} 张")
+                print(f"[search] '{q}' → {len(urls)} 张"
+                      + (" (exit=%d 但有结果)" % r.returncode
+                         if r.returncode else ""))
                 return urls
-            last_err = RuntimeError(f"图片搜索无结果: {q}")
+            last_err = RuntimeError(
+                f"图片搜索无结果: {q} (exit={r.returncode})")
         except Exception as e:
             last_err = e
             print(f"[search] '{q}' 失败, 尝试降级: {str(e)[:120]}")
