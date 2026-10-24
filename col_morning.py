@@ -47,7 +47,7 @@ def run(dry_run: bool = False) -> dict:
 
     ts = today_bjt().replace("-", "")
     img = os.path.join(OUTPUT_DIR, f"morning_{ts}.png")
-    gen_image(theme_prompt, img, size="1344x768")
+    gen_image(theme_prompt, img, size="1344x768", hint=theme_name)
 
     raw = call_llm(
         f"今天的AI壁纸主题是「{theme_name}」。写一段40~80字的早安微博文案, "

@@ -109,8 +109,11 @@ def publish(content: str, image_paths=None, dry_run=False) -> dict:
 # ---------------------------------------------------------------- AI 能力
 
 def gen_image(prompt: str, out_path: str, size: str = "1344x768",
-              timeout: int = 300) -> str:
-    """z-ai 图片生成; 生成服务故障时降级为图片搜索+下载(2026-10-24 405事件)"""
+              timeout: int = 300, hint: str = "") -> str:
+    """z-ai 图片生成; 生成服务故障时降级为图片搜索+下载(2026-10-24 405事件)
+
+    hint: 中文主题名等备选搜索词(部分英文查询会触发搜索后端错误,
+    多候选交叉兜底)"""
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     try:
         subprocess.run(["z-ai", "image", "-p", prompt, "-o", out_path,
@@ -121,15 +124,31 @@ def gen_image(prompt: str, out_path: str, size: str = "1344x768",
             return out_path
     except Exception as e:
         print(f"[img] 生成失败({str(e)[:80]}), 降级图片搜索")
-    # ---- 降级: 用提示词前段搜真实图片, 多候选中优先横版 ----
-    q = prompt.split(",")[0].strip()[:60]
+    # ---- 降级: 多查询候选 × 真实图片, 横版优先 ----
+    words = prompt.replace(",", " ").split()
+    queries = []
+    if hint:
+        queries.append(hint)
+    if "," in prompt:
+        queries.append(prompt.split(",")[0].strip()[:60])
+    if len(words) >= 3:
+        queries.append(" ".join(words[:3]))
+    if len(words) >= 2:
+        queries.append(" ".join(words[:2]))
+    seen = set()
+    queries = [q for q in queries if q and q not in seen
+               and not seen.add(q)]
     want_wide = size and "x" in str(size) and \
         int(str(size).split("x")[0]) >= int(str(size).split("x")[1])
-    try:
-        cands = search_images(q, count=6) or []
-    except Exception as e:
-        print(f"[img] 搜索降级也失败: {str(e)[:80]}")
-        cands = []
+    cands = []
+    for q in queries:
+        try:
+            cands = search_images(q, count=6) or []
+        except Exception as e:
+            print(f"[img] 搜索'{q}'失败: {str(e)[:60]}")
+            continue
+        if cands:
+            break
     best = None
     for url in cands:
         try:
@@ -141,7 +160,7 @@ def gen_image(prompt: str, out_path: str, size: str = "1344x768",
             with Image.open(out_path) as im:
                 if im.size[0] >= im.size[1]:      # 横版 ✓
                     print(f"[img] 搜索降级图(横版{im.size[0]}x{im.size[1]})"
-                          f" → {os.path.basename(out_path)}")
+                          f" ← '{q}'")
                     return out_path
             if best is None:
                 best = url                        # 先留一张竖版兜底
