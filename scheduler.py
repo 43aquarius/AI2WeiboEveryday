@@ -120,6 +120,7 @@ def reconcile_today_posts() -> dict:
         with urllib.request.urlopen(req, timeout=30) as r:
             d = json.loads(r.read().decode("utf-8", "ignore"))
         today = beijing_now().strftime("%Y-%m-%d")
+        today_posts = []            # [(created_dt, text)] 今日全部帖
         for post in (d.get("data", {}).get("list") or []):
             ca = post.get("created_at", "")
             # weibo 返回 "Wed Oct 22 08:33:35 +0800 2026" 字符串(部分场景为秒级数字)
@@ -134,9 +135,23 @@ def reconcile_today_posts() -> dict:
             except (ValueError, TypeError):
                 continue
             text = post.get("text_raw", "") or post.get("text", "")
+            today_posts.append((created, text))
             for col, conf in COLUMNS.items():
                 if conf["tag"] in text:
                     found[col] = True
+        # 时间窗兜底(2026-10-30 实测: 文案不带话题标签时 tag 匹配全失败,
+        # 回滚清 state 后 catch-up 重发当日已发档 morning×3/yiyan×2):
+        # 档期 ±90 分钟内有任意帖 → 视为该栏目已发(宁可少发不重发)
+        for col, conf in COLUMNS.items():
+            if found.get(col):
+                continue
+            hh, mm = conf["slot"]
+            w0 = beijing_now().replace(
+                hour=hh, minute=mm, second=0, microsecond=0)
+            lo, hi = w0 - datetime.timedelta(minutes=90), \
+                w0 + datetime.timedelta(minutes=90)
+            if any(lo <= t <= hi for t, _ in today_posts):
+                found[col] = True
     except Exception as e:
         log(f"   [warn] 对账失败(退回state判断): {e}")
     return found
