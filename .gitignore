@@ -5,6 +5,3 @@ scheduler.log
 __pycache__/
 *.pyc
 catchup.at
-
-secrets_backup.json
-config.json
